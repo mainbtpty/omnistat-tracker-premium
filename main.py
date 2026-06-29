@@ -1,52 +1,34 @@
 import discord
 from discord.ext import tasks, commands
 import os
-from mcstatus import MCServer
-from http.server import BaseHTTPRequestHandler, HTTPServer
-import threading
+import json
 
-# 1. Background Web Server required for Render Free Tier
-class SimpleWebServer(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header("Content-type", "text/html")
-        self.end_headers()
-        self.wfile.write(b"Stat Tracker is fully functional.")
+if os.path.exists("config.json"):
+    with open("config.json", "r") as f:
+        config = json.load(f)
+else:
+    config = {"MINECRAFT_SERVER_IP": "2b2t.org", "UPDATE_INTERVAL_SECONDS": 60}
 
-def run_server():
-    server = HTTPServer(('0.0.0.0', 10000), SimpleWebServer)
-    server.serve_forever()
-
-threading.Thread(target=run_server, daemon=True).start()
-
-# 2. Discord Stat Tracker Engine Configuration
 class StatBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
-        # No message content intent needed just to update a bot status profile!
+        intents.message_content = False  
         super().__init__(command_prefix="!", intents=intents)
 
     async def setup_hook(self):
-        # Start the background auto-refresh loop task
         self.update_status_loop.start()
 
-    @tasks.loop(seconds=60)
+    @tasks.loop(seconds=config.get("UPDATE_INTERVAL_SECONDS", 60))
     async def update_status_loop(self):
-        # Fallback to a major public server if no IP is provided in environment variables
-        server_ip = os.getenv("MINECRAFT_SERVER_IP", "play.hypixel.net")
+        server_ip = os.getenv("MINECRAFT_SERVER_IP", config.get("MINECRAFT_SERVER_IP", "2b2t.org"))
         try:
-            # Look up the target server data over the network
+            from mcstatus import MCServer
             server = MCServer.lookup(server_ip)
             status = await server.async_status()
-            
-            # Set the bot's status text to show live player metrics
             status_text = f"🎮 {status.players.online}/{status.players.max} players on {server_ip}"
             await self.change_presence(activity=discord.Game(name=status_text))
-            print(f"📊 Status updated successfully: {status_text}")
-            
         except Exception as e:
             await self.change_presence(activity=discord.Game(name="⚠️ Server Offline"))
-            print(f"❌ Failed to reach Minecraft server: {e}")
 
     @update_status_loop.before_loop
     async def before_update_loop(self):
@@ -56,7 +38,7 @@ bot = StatBot()
 
 @bot.event
 async def on_ready():
-    print(f"🤖 Stat Tracker online as: {bot.user.name}")
+    print(f"🤖 Operational Status: Online as {bot.user.name}")
 
 if __name__ == "__main__":
     token = os.getenv("DISCORD_TOKEN")
